@@ -1,6 +1,6 @@
 ---
 name: "create image codex"
-description: "Create images on codex esp with 9router (e.g., generate image, edit/inpaint/mask, background removal, transparent background, product shots, concept art, covers, or batch variants). Runs built-in image_generation_call first, then falls back to custom endpoint via auth.json."
+description: "Create images on Codex, especially with 9Router (e.g., generate image, edit/inpaint/mask, background removal, transparent background, product shots, concept art, covers, or batch variants). Uses built-in image generation first when enabled, then falls back to the provider endpoint from ~/.codex/config.toml using ~/.codex/auth.json."
 ---
 
 # Image Generation Skill
@@ -21,51 +21,85 @@ Generates or edits images for the current project (website assets, game assets, 
 
 ## Environment — Priority Order
 
-### 1st choice: Built-in image_generation_call (PREFERRED)
-If built-in tool is available in this session → use it directly.  
-Best quality, no API key needed, platform-handled.  
+### 1st choice: Built-in image generation (PREFERRED)
+Use built-in `image_generation_call` if **both** conditions are true:
+- `~/.codex/config.toml` contains:
+  ```toml
+  [features]
+  image_generation = true
+  ```
+- the built-in image generation tool is available in this session
+
+If both are true → use it directly. Best quality, no API call needed.  
 Skip all steps below if this works.
 
-### 2nd choice: Custom endpoint via auth.json
+### 2nd choice: Provider fallback via Codex config
 Only if built-in tool is NOT available in this session.
 
-Read credentials from `~/.config/imagegen/auth.json`:
-```json
-{
-  "endpoint": "https://your-proxy-or-api/v1/images/generations",
-  "api_key": "YOUR_KEY_HERE",
-  "model": "gpt-image-2"
-}
-```
-
-Auto-detect and run:
-```bash
-python3 - <<'PY'
-import json, sys
+**Step 1 — Read config from `~/.codex/config.toml`:**
+```python
+import tomllib
 from pathlib import Path
 
-auth_path = Path.home() / '.config' / 'imagegen' / 'auth.json'
-if not auth_path.exists():
-    sys.exit("[imagegen] auth.json not found. See: https://github.com/afu-it/create-image-codex/blob/main/SETUP.md")
+config = tomllib.loads((Path.home() / ".codex" / "config.toml").read_text())
 
-auth = json.loads(auth_path.read_text())
-endpoint = auth.get('endpoint', '').strip()
-api_key  = auth.get('api_key', '').strip()
-model    = auth.get('model', 'gpt-image-2').strip()
+features = config.get("features", {})
+image_enabled = bool(features.get("image_generation", False))
 
-if not endpoint or not api_key:
-    sys.exit("[imagegen] auth.json is missing 'endpoint' or 'api_key'.")
+provider_name = config.get("model_provider", "").strip()
+providers     = config.get("model_providers", {})
+provider_cfg  = providers.get(provider_name, {})
+base_url      = str(provider_cfg.get("base_url", "")).rstrip("/")
 
-print(f'[imagegen] endpoint: {endpoint}')
-print(f'[imagegen] model   : {model}')
-PY
+image_cfg     = config.get("image_generation", {})
+image_model   = str(image_cfg.get("model", "")).strip() or "gpt-image-2"
+
+endpoint = f"{base_url}/images/generations"
+
+print("image_enabled:", image_enabled)
+print("endpoint     :", endpoint)
+print("model        :", image_model)
 ```
 
-Full curl call with SSE parser:
+**Step 2 — Read API key from `~/.codex/auth.json`:**
+```python
+import json
+from pathlib import Path
+
+auth = json.loads((Path.home() / ".codex" / "auth.json").read_text())
+api_key = str(auth.get("OPENAI_API_KEY", "")).strip()
+
+if not api_key:
+    raise SystemExit("[imagegen] OPENAI_API_KEY missing in ~/.codex/auth.json")
+```
+
+> ⚠️ Only use `OPENAI_API_KEY`. Never read `tokens.id_token`, `tokens.access_token`, or `tokens.refresh_token`.
+
+**Step 3 — Call image endpoint:**
 ```bash
-ENDPOINT=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path.home().joinpath('.config/imagegen/auth.json').read_text()); print(d['endpoint'])")
-API_KEY=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path.home().joinpath('.config/imagegen/auth.json').read_text()); print(d['api_key'])")
-MODEL=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path.home().joinpath('.config/imagegen/auth.json').read_text()); print(d.get('model','gpt-image-2'))")
+ENDPOINT=$(python3 -c "
+import json,tomllib
+from pathlib import Path
+cfg = tomllib.loads((Path.home()/'.codex'/'config.toml').read_text())
+p = cfg['model_provider']
+base = cfg['model_providers'][p]['base_url'].rstrip('/')
+print(f'{base}/images/generations')
+")
+
+API_KEY=$(python3 -c "
+import json
+from pathlib import Path
+a = json.loads((Path.home()/'.codex'/'auth.json').read_text())
+print(a['OPENAI_API_KEY'])
+")
+
+MODEL=$(python3 -c "
+import tomllib
+from pathlib import Path
+cfg = tomllib.loads((Path.home()/'.codex'/'config.toml').read_text())
+m = cfg.get('image_generation', {}).get('model', 'gpt-image-2')
+print(m)
+")
 
 mkdir -p tmp/imagegen output/imagegen
 
@@ -90,31 +124,76 @@ for block in raw.strip().split('\n\n'):
         final = json.loads(data)
 
 if not final:
-    raise SystemExit('[imagegen] No done event in SSE response.')
+    # fallback: try plain JSON response (non-SSE)
+    try:
+        final = json.loads(raw)
+    except Exception:
+        raise SystemExit('[imagegen] No valid response from image endpoint.')
+
+b64 = (
+    final.get('data', [{}])[0].get('b64_json')
+    or final.get('data', [{}])[0].get('url')
+)
+if not b64:
+    raise SystemExit('[imagegen] No image data in response.')
 
 out = Path('output/imagegen/result.png')
-out.write_bytes(base64.b64decode(final['data'][0]['b64_json']))
+out.write_bytes(base64.b64decode(b64))
 print(f'[imagegen] Saved: {out} ({out.stat().st_size:,} bytes)')
 PY
 ```
 
 ### STOP conditions (strict)
+- If `~/.codex/config.toml` is missing → STOP, tell user to set up Codex config
+- If `[features] image_generation = true` is missing → STOP, tell user to add it to config.toml
+- If `~/.codex/auth.json` is missing or `OPENAI_API_KEY` is empty → STOP, tell user to set up auth.json
+- If provider `base_url` is missing → STOP, report which provider is missing
 - Do NOT hardcode any API key or endpoint URL
-- Do NOT use direct api.openai.com unless user sets it in auth.json
+- Do NOT read `tokens.id_token`, `tokens.access_token`, or `tokens.refresh_token`
+- Do NOT use the chat model (`model = "cx/gpt-5.5"`) as the image model
+- Do NOT use `~/.config/imagegen/auth.json` (old path — deprecated)
 - Do NOT use sharp, canvas, jimp, PIL as image substitute
 - Do NOT fake image generation with placeholder or solid colour
-- If built-in unavailable AND auth.json missing → tell user to run `npx skills add afu-it/create-image-codex`, then STOP
 - If both options fail → report clearly and STOP
+
+---
+
+## Recommended config.toml
+
+```toml
+[features]
+image_generation = true
+
+model = "cx/gpt-5.5"
+model_provider = "9router"
+
+[model_providers.9router]
+name = "9Router"
+base_url = "http://localhost:20128/v1"
+wire_api = "responses"
+
+[agents.subagent]
+model = "cx/gpt-5.5"
+
+[image_generation]
+enabled = true
+model = "gpt-image-2"
+# For 9Router with dedicated image model:
+# model = "cx/gpt-5.4-image"
+```
 
 ---
 
 ## Workflow
 
 0. **Environment check (strict order):**
-   - a. Built-in `image_generation_call` available? → use it, proceed
-   - b. `~/.config/imagegen/auth.json` exists and valid? → use curl path, proceed
-   - c. Neither → STOP. Tell user: `npx skills add afu-it/create-image-codex` then setup auth.json
-   - d. NEVER ask for or hardcode an API key
+   - a. `~/.codex/config.toml` exists? → read config
+   - b. `[features] image_generation = true`? → enabled
+   - c. Built-in `image_generation_call` available? → use it, proceed
+   - d. If built-in unavailable → check `~/.codex/auth.json` for `OPENAI_API_KEY`
+   - e. Derive endpoint from `config.toml` provider `base_url`
+   - f. If anything missing → STOP with clear message
+   - g. NEVER ask for or hardcode an API key
 
 1. Decide intent: generate vs edit vs batch
 2. Collect inputs: prompt(s), constraints, input image(s) if edit
@@ -128,11 +207,13 @@ PY
 ---
 
 ## Defaults & rules
-- Default model: **`gpt-image-2`** (latest) — read from `auth.json` field `model`, fallback to `gpt-image-2`
-- For 9Router users: use `cx/gpt-5.4-image` as model in auth.json
+- Default image model: **`gpt-image-2`** — from `[image_generation].model` in config.toml, fallback `gpt-image-2`
+- For 9Router: set `model = "cx/gpt-5.4-image"` in `[image_generation]` if supported
 - Prefer built-in tool always
 - Use `tmp/imagegen/` for intermediates, `output/imagegen/` for finals
 - Never modify scripts; never write one-off replacements
+- Auth path: `~/.codex/auth.json` (NOT `~/.config/imagegen/auth.json`)
+- Config path: `~/.codex/config.toml`
 
 ---
 
