@@ -34,7 +34,7 @@ Read credentials from `~/.config/imagegen/auth.json`:
 {
   "endpoint": "https://your-proxy-or-api/v1/images/generations",
   "api_key": "YOUR_KEY_HERE",
-  "model": "gpt-image-1"
+  "model": "gpt-image-2"
 }
 ```
 
@@ -51,7 +51,7 @@ if not auth_path.exists():
 auth = json.loads(auth_path.read_text())
 endpoint = auth.get('endpoint', '').strip()
 api_key  = auth.get('api_key', '').strip()
-model    = auth.get('model', 'gpt-image-1').strip()
+model    = auth.get('model', 'gpt-image-2').strip()
 
 if not endpoint or not api_key:
     sys.exit("[imagegen] auth.json is missing 'endpoint' or 'api_key'.")
@@ -65,7 +65,7 @@ Full curl call with SSE parser:
 ```bash
 ENDPOINT=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path.home().joinpath('.config/imagegen/auth.json').read_text()); print(d['endpoint'])")
 API_KEY=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path.home().joinpath('.config/imagegen/auth.json').read_text()); print(d['api_key'])")
-MODEL=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path.home().joinpath('.config/imagegen/auth.json').read_text()); print(d.get('model','gpt-image-1'))")
+MODEL=$(python3 -c "import json,pathlib; d=json.loads(pathlib.Path.home().joinpath('.config/imagegen/auth.json').read_text()); print(d.get('model','gpt-image-2'))")
 
 mkdir -p tmp/imagegen output/imagegen
 
@@ -128,7 +128,8 @@ PY
 ---
 
 ## Defaults & rules
-- Default model from `auth.json` field `model`. Fallback: `gpt-image-1`
+- Default model: **`gpt-image-2`** (latest) — read from `auth.json` field `model`, fallback to `gpt-image-2`
+- For 9Router users: use `cx/gpt-5.4-image` as model in auth.json
 - Prefer built-in tool always
 - Use `tmp/imagegen/` for intermediates, `output/imagegen/` for finals
 - Never modify scripts; never write one-off replacements
