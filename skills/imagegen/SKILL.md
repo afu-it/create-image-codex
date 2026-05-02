@@ -24,58 +24,50 @@ Generates or edits images for the current project (website assets, game assets, 
 ### Step 0: Auto-patch config.toml (run first, always)
 
 Before anything else, ensure `~/.codex/config.toml` has the required image generation settings.
-If missing entries, **auto-add them** without asking the user.
+If missing entries, **auto-add them without asking the user**.
 
 ```python
-import tomllib, tomli_w
 from pathlib import Path
+import sys
 
 config_path = Path.home() / ".codex" / "config.toml"
 if not config_path.exists():
     raise SystemExit("[imagegen] ~/.codex/config.toml not found. Please set up Codex first.")
 
 raw = config_path.read_text()
-config = tomllib.loads(raw)
-changed = False
+lines_to_add = []
 
-# Ensure [features] image_generation = true
-features = config.setdefault("features", {})
-if not features.get("image_generation"):
-    features["image_generation"] = True
-    changed = True
-    print("[imagegen] Auto-added: [features] image_generation = true")
+# Check [features] image_generation
+if "image_generation" not in raw:
+    lines_to_add.append("\n[features]\nimage_generation = true")
+    print("[imagegen] Auto-adding: [features] image_generation = true")
 
-# Ensure [image_generation] block with correct model
-img_cfg = config.setdefault("image_generation", {})
-if not img_cfg.get("model"):
-    # detect provider and pick right model
-    provider = config.get("model_provider", "").strip()
-    if "9router" in provider.lower():
-        img_cfg["model"] = "cx/gpt-5.4-image"
-    else:
-        img_cfg["model"] = "gpt-image-2"
-    changed = True
-    print(f"[imagegen] Auto-added: [image_generation] model = {img_cfg['model']}")
+# Check [image_generation] model block
+if "[image_generation]" not in raw:
+    # Detect provider from existing config
+    provider = ""
+    for line in raw.splitlines():
+        if line.strip().startswith("model_provider"):
+            provider = line.split("=")[-1].strip().strip('"').lower()
+            break
+    model = "cx/gpt-5.4-image" if "9router" in provider else "gpt-image-2"
+    lines_to_add.append(f"\n[image_generation]\nmodel = \"{model}\"")
+    print(f"[imagegen] Auto-adding: [image_generation] model = {model}")
 
-if changed:
-    config_path.write_text(tomli_w.dumps(config))
-    print("[imagegen] config.toml patched successfully.")
+if lines_to_add:
+    with open(config_path, "a") as f:
+        f.write("\n" + "\n".join(lines_to_add) + "\n")
+    print("[imagegen] config.toml patched.")
 else:
     print("[imagegen] config.toml already configured.")
 ```
-
-> If `tomli_w` is not available, fall back to appending raw TOML lines:
-> ```python
-> with open(config_path, 'a') as f:
->     f.write('\n[features]\nimage_generation = true\n\n[image_generation]\nmodel = "cx/gpt-5.4-image"\n')
-> ```
 
 ---
 
 ### 1st choice: Built-in image generation (PREFERRED)
 
 Use built-in `image_generation_call` if:
-- `[features] image_generation = true` (auto-patched above)
+- `[features] image_generation = true` is set (auto-patched above)
 - built-in tool is available in this session
 
 If both → use it directly. Skip steps below.
@@ -86,94 +78,82 @@ If both → use it directly. Skip steps below.
 
 Only if built-in tool is NOT available in this session.
 
-**Read all config in one shot:**
-```python
-import json, tomllib
-from pathlib import Path
-
-config_path = Path.home() / ".codex" / "config.toml"
-auth_path   = Path.home() / ".codex" / "auth.json"
-
-config = tomllib.loads(config_path.read_text())
-auth   = json.loads(auth_path.read_text())
-
-# --- Provider config ---
-provider_name = config.get("model_provider", "").strip()
-providers     = config.get("model_providers", {})
-provider_cfg  = providers.get(provider_name, {})
-base_url      = str(provider_cfg.get("base_url", "")).rstrip("/")
-
-if not base_url:
-    raise SystemExit(f"[imagegen] base_url missing for provider '{provider_name}'")
-
-# --- Image model ---
-img_cfg     = config.get("image_generation", {})
-image_model = str(img_cfg.get("model", "")).strip()
-if not image_model:
-    image_model = "cx/gpt-5.4-image" if "9router" in provider_name.lower() else "gpt-image-2"
-
-# --- API key ---
-# Priority: tokens.access_token (9Router) > OPENAI_API_KEY
-# For 9Router, the access_token IS the bearer token used in Authorization header
-tokens  = auth.get("tokens", {})
-api_key = (
-    tokens.get("access_token")
-    or auth.get("OPENAI_API_KEY")
-    or ""
-).strip()
-
-if not api_key:
-    raise SystemExit("[imagegen] No API key found in ~/.codex/auth.json")
-
-endpoint = f"{base_url}/images/generations"
-
-print("endpoint :", endpoint)
-print("model    :", image_model)
-print("key_set  :", bool(api_key))
-```
-
-**curl call (9Router / compatible endpoint):**
+**Setup env vars:**
 ```bash
 python3 - <<'PYSETUP' > /tmp/imagegen_env.sh
 import json, tomllib
 from pathlib import Path
 
-config = tomllib.loads((Path.home()/".codex"/"config.toml").read_text())
-auth   = json.loads((Path.home()/".codex"/"auth.json").read_text())
+config = tomllib.loads((Path.home() / ".codex" / "config.toml").read_text())
+auth   = json.loads((Path.home() / ".codex" / "auth.json").read_text())
 
-provider_name = config.get("model_provider","").strip()
+provider_name = config.get("model_provider", "").strip()
 base_url = config["model_providers"][provider_name]["base_url"].rstrip("/")
 endpoint = f"{base_url}/images/generations"
 
-img_cfg = config.get("image_generation",{})
+img_cfg = config.get("image_generation", {})
 model = img_cfg.get("model") or ("cx/gpt-5.4-image" if "9router" in provider_name.lower() else "gpt-image-2")
 
-tokens = auth.get("tokens",{})
-api_key = tokens.get("access_token") or auth.get("OPENAI_API_KEY","")
+# KEY RESOLUTION (confirmed working order for 9Router):
+# 1. OPENAI_API_KEY in auth.json  — this is the 9Router sk-... key
+# 2. tokens.access_token          — this is an OpenAI JWT, NOT a 9Router key; do NOT use for 9Router
+# If OPENAI_API_KEY is present, always prefer it regardless of provider
+tokens  = auth.get("tokens", {})
+api_key = (
+    auth.get("OPENAI_API_KEY", "")
+    or tokens.get("access_token", "")
+).strip()
 
-print(f'export IMAGEGEN_ENDPOINT="{endpoint}"')
-print(f'export IMAGEGEN_MODEL="{model}"')
-print(f'export IMAGEGEN_KEY="{api_key}"')
+if not api_key:
+    raise SystemExit("[imagegen] No API key found in ~/.codex/auth.json")
+
+print(f'export IMAGEGEN_ENDPOINT={json.dumps(endpoint)}')
+print(f'export IMAGEGEN_MODEL={json.dumps(model)}')
+print(f'export IMAGEGEN_KEY={json.dumps(api_key)}')
 PYSETUP
 
 source /tmp/imagegen_env.sh
+```
+
+**Build request JSON:**
+```bash
+python3 - <<'PY' > tmp/imagegen/request.json
+import json, os
+prompt = """<PROMPT>""".strip()
+print(json.dumps({
+    "model": os.environ["IMAGEGEN_MODEL"],
+    "prompt": prompt,
+    "n": 1,
+    "size": "auto",
+    "quality": "auto",
+    "background": "auto",
+    "image_detail": "high",
+    "output_format": "png"
+}))
+PY
+```
+
+**Call endpoint:**
+```bash
 mkdir -p tmp/imagegen output/imagegen
 
 curl -sS -X POST "$IMAGEGEN_ENDPOINT" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $IMAGEGEN_KEY" \
   -H "Accept: text/event-stream" \
-  -d "{\"model\":\"$IMAGEGEN_MODEL\",\"prompt\":\"<PROMPT>\",\"n\":1,\"size\":\"auto\",\"quality\":\"auto\",\"background\":\"auto\",\"image_detail\":\"high\",\"output_format\":\"png\"}" \
+  --data-binary @tmp/imagegen/request.json \
   -o tmp/imagegen/response.raw
+```
 
-python3 - <<'PY'
+**Parse response (handles both SSE and plain JSON):**
+```python
 import json, base64
 from pathlib import Path
 
 raw = Path("tmp/imagegen/response.raw").read_text(errors="replace")
 final = None
 
-# Try SSE first
+# Try SSE event stream first
 for block in raw.strip().split("\n\n"):
     lines = block.splitlines()
     ev   = next((l[6:].strip() for l in lines if l.startswith("event:")), "")
@@ -182,12 +162,16 @@ for block in raw.strip().split("\n\n"):
         final = json.loads(data)
         break
 
-# Fallback: plain JSON
+# Fallback: plain JSON response (9Router returns plain JSON)
 if not final:
     try:
         final = json.loads(raw)
-    except Exception:
-        raise SystemExit("[imagegen] Could not parse response from image endpoint.")
+    except Exception as exc:
+        print(raw[:1000])
+        raise SystemExit(f"[imagegen] Could not parse response: {exc}")
+
+if "error" in final:
+    raise SystemExit(f"[imagegen] API error: {final['error']}")
 
 item = final.get("data", [{}])[0]
 b64  = item.get("b64_json", "")
@@ -202,51 +186,36 @@ elif url:
     urllib.request.urlretrieve(url, out)
     print(f"[imagegen] Downloaded: {out} ({out.stat().st_size:,} bytes)")
 else:
+    print(raw[:1000])
     raise SystemExit("[imagegen] No b64_json or url in response.")
-PY
 ```
 
 ---
 
 ### STOP conditions (strict)
 - If `~/.codex/config.toml` not found → STOP, tell user to set up Codex
-- If `~/.codex/auth.json` not found → STOP, tell user to authenticate Codex
+- If `~/.codex/auth.json` not found → STOP, tell user to authenticate Codex (`codex auth login`)
 - If no API key found in auth.json → STOP, report missing key
-- If provider `base_url` missing → STOP, report which provider config is missing
+- If provider `base_url` missing → STOP, report which provider config is incomplete
 - Do NOT hardcode any API key or endpoint URL
+- Do NOT use `tokens.access_token` as image API key for 9Router — it is an OpenAI JWT, not a 9Router bearer key
 - Do NOT use `~/.config/imagegen/auth.json` (old path — removed)
 - Do NOT use sharp, canvas, jimp, PIL as image substitute
 - Do NOT fake image generation with placeholder or solid colour
-- Do NOT stop just because `OPENAI_API_KEY` is missing — 9Router uses `tokens.access_token`
 
 ---
 
-## Workflow
+## Key resolution (confirmed working)
 
-0. **Environment setup (always run first):**
-   - a. Auto-patch `~/.codex/config.toml` → add `[features] image_generation = true` and `[image_generation] model` if missing
-   - b. Try built-in `image_generation_call` → if available, use it
-   - c. If built-in unavailable → read config.toml + auth.json, derive endpoint, call curl
-   - d. NEVER ask user to manually edit config — patch it automatically
-
-1. Decide intent: generate vs edit vs batch
-2. Collect inputs: prompt(s), constraints, input image(s) if edit
-3. If batch: write temp JSONL under `tmp/imagegen/`, delete after
-4. Augment prompt into structured spec
-5. Run via priority order above
-6. Validate output: subject, style, composition, text accuracy
-7. Iterate with single targeted change if needed
-8. Save to `output/imagegen/` and note final prompt used
-
----
-
-## Key resolution (priority order)
-
-| Provider | Key source | Field |
+| Priority | Field in `auth.json` | When to use |
 |---|---|---|
-| 9Router | `~/.codex/auth.json` | `tokens.access_token` |
-| OpenAI direct | `~/.codex/auth.json` | `OPENAI_API_KEY` |
-| Any | `~/.codex/auth.json` | `tokens.access_token` → `OPENAI_API_KEY` |
+| ✅ 1st | `OPENAI_API_KEY` | Always — this is the 9Router `sk-...` key |
+| ⚠️ 2nd | `tokens.access_token` | Fallback only — OpenAI JWT, fails on 9Router |
+| ❌ Never | `tokens.id_token` | OpenAI identity token, never use for API calls |
+| ❌ Never | `tokens.refresh_token` | Token refresh only, not an API key |
+
+> **Why:** `OPENAI_API_KEY` in Codex auth.json holds the actual 9Router `sk-...` bearer key.
+> `tokens.access_token` is an OpenAI-issued JWT used only for OpenAI services, not 9Router.
 
 ---
 
@@ -283,11 +252,31 @@ model = "cx/gpt-5.4-image"
 
 ---
 
+## Workflow
+
+0. **Environment setup (always run first):**
+   - a. Auto-patch `~/.codex/config.toml` → append `[features]` and `[image_generation]` blocks if missing
+   - b. Try built-in `image_generation_call` → if available, use it
+   - c. If built-in unavailable → read config.toml + auth.json, derive endpoint, call curl
+   - d. NEVER ask user to manually edit config — patch it automatically
+   - e. NEVER try `tokens.access_token` before `OPENAI_API_KEY`
+
+1. Decide intent: generate vs edit vs batch
+2. Collect inputs: prompt(s), constraints, input image(s) if edit
+3. If batch: write temp JSONL under `tmp/imagegen/`, delete after
+4. Augment prompt into structured spec
+5. Run via priority order above
+6. Validate output: subject, style, composition, text accuracy
+7. Iterate with single targeted change if needed
+8. Save to `output/imagegen/` and note final prompt used
+
+---
+
 ## Defaults & rules
 - Default image model: `cx/gpt-5.4-image` for 9Router, `gpt-image-2` otherwise
 - Endpoint: always derived from `config.toml` provider `base_url` → `<base_url>/images/generations`
-- Auth: `~/.codex/auth.json` (NOT `~/.config/imagegen/auth.json`)
-- Config: `~/.codex/config.toml` (auto-patched if needed)
+- Auth: `~/.codex/auth.json` key field `OPENAI_API_KEY`
+- Config: `~/.codex/config.toml` (auto-patched if missing entries)
 - Use `tmp/imagegen/` for intermediates, `output/imagegen/` for finals
 
 ---
