@@ -1,0 +1,12 @@
+# Never commit credentials
+auth.json
+*.key
+*.secret
+.env
+
+# Temp and output files
+tmp/
+output/
+__pycache__/
+*.pyc
+.DS_Store

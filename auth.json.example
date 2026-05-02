@@ -1,0 +1,5 @@
+{
+  "endpoint": "YOUR_ENDPOINT/v1/images/generations",
+  "api_key": "YOUR_API_KEY_HERE",
+  "model": "gpt-image-1"
+}
