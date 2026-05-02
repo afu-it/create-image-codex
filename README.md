@@ -1,69 +1,101 @@
 # create-image-codex
 
-A [Codex](https://openai.com/codex) skill for AI image generation — supports built-in platform tool and any OpenAI-compatible endpoint via `auth.json`.
+> **One command. AI image generation in Codex.** Built-in platform tool first, custom endpoint fallback — no hardcoded keys.
 
-## Features
+[![version](https://img.shields.io/badge/version-1.0.0-teal?style=flat-square)](./skills/imagegen/SKILL.md)
+[![works with](https://img.shields.io/badge/works%20with-Codex%20%7C%20Claude%20%7C%20Cursor%20%7C%20Windsurf-blue?style=flat-square)](#)
+[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](#)
 
-- ✅ Auto-uses built-in `image_generation_call` if available (best quality)
-- ✅ Falls back to any custom endpoint via `~/.config/imagegen/auth.json`
-- ✅ Works with 9Router, OpenRouter, direct OpenAI, or any compatible proxy
-- ✅ No hardcoded API keys — credentials stay on your machine
-- ✅ SSE stream parsing for real-time generation
-- ✅ Supports generate, edit, and batch workflows
+---
 
-## Quick Start
-
-### 1. Clone / install skill
+## Install
 
 ```bash
-git clone https://github.com/afu-it/create-image-codex ~/.codex/skills/imagegen
+# Install into your current project
+npx skills add afu-it/create-image-codex
+
+# Install globally (all projects)
+npx skills add afu-it/create-image-codex -g
+
+# Preview before installing
+npx skills add afu-it/create-image-codex --list
 ```
 
-### 2. Setup auth.json
+Works with **Codex, Claude Code, Cursor, Windsurf**, and other agents.
 
-See [SETUP.md](SETUP.md) for full instructions.
-
-```bash
-mkdir -p ~/.config/imagegen
-cp auth.json.example ~/.config/imagegen/auth.json
-# Edit ~/.config/imagegen/auth.json with your endpoint + key
-```
-
-### 3. Use in Codex
-
-Just ask Codex to generate an image:
-
-```
-Generate a photorealistic hero image of a mountain at sunset
-```
-
-Codex will automatically use the best available method.
+---
 
 ## How It Works
 
 ```
-1st → Built-in image_generation_call (platform, no key needed)
+1st → Built-in image_generation_call (platform, best quality, no key needed)
 2nd → Custom endpoint from ~/.config/imagegen/auth.json
       ↳ 9Router, OpenRouter, direct OpenAI, or any compatible proxy
 ```
 
+The skill auto-detects which path to use — you never have to configure anything for the built-in path.
+
+---
+
+## Setup auth.json (for custom endpoint)
+
+Only needed if built-in tool is not available in your session:
+
+```bash
+mkdir -p ~/.config/imagegen
+cat > ~/.config/imagegen/auth.json << 'EOF'
+{
+  "endpoint": "YOUR_ENDPOINT/v1/images/generations",
+  "api_key": "YOUR_API_KEY_HERE",
+  "model": "gpt-image-1"
+}
+EOF
+```
+
+| Provider | endpoint | model |
+|---|---|---|
+| 9Router / local proxy | `http://localhost:20128/v1/images/generations` | `cx/gpt-5.4-image` |
+| OpenRouter | `https://openrouter.ai/api/v1/images/generations` | `openai/gpt-image-1` |
+| Direct OpenAI | `https://api.openai.com/v1/images/generations` | `gpt-image-1` |
+
+Full setup guide: [SETUP.md](./SETUP.md)
+
+---
+
+## Usage
+
+Just ask Codex to generate an image:
+
+```
+Generate a photorealistic hero image for the landing page
+```
+
+```
+Generate a product mockup of a coffee mug on a wooden table
+```
+
+```
+Edit this image: replace the background with a sunset gradient
+```
+
+---
+
 ## File Structure
 
 ```
-├── SKILL.md              ← Main skill instructions for Codex
-├── SETUP.md              ← User setup guide
-├── auth.json.example     ← Template config (copy to ~/.config/imagegen/)
-├── .gitignore            ← Excludes auth.json and outputs
-└── references/
-    ├── cli.md
-    ├── image-api.md
-    ├── prompting.md
-    └── sample-prompts.md
+├── skills/
+│   └── imagegen/
+│       └── SKILL.md          ← main skill instructions
+├── SETUP.md              ← auth.json setup guide
+├── auth.json.example     ← template (copy to ~/.config/imagegen/)
+└── .gitignore
 ```
+
+---
 
 ## Security
 
-`auth.json` is **never committed** — it lives only at `~/.config/imagegen/auth.json` on your machine. The `.gitignore` enforces this.
+`auth.json` is **never committed** — lives only at `~/.config/imagegen/auth.json` on your machine.
 
 ## License
 
