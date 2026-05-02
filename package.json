@@ -1,0 +1,29 @@
+{
+  "name": "create-image-codex",
+  "version": "1.0.0",
+  "description": "Installer for the imagegen Codex skill — supports built-in platform tool and any OpenAI-compatible endpoint via auth.json",
+  "bin": {
+    "create-image-codex": "./bin/create-image-codex.js"
+  },
+  "scripts": {
+    "postinstall": "node ./bin/create-image-codex.js"
+  },
+  "keywords": [
+    "codex",
+    "openai",
+    "image-generation",
+    "codex-skill",
+    "gpt-image",
+    "ai"
+  ],
+  "author": "afu-it",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/afu-it/create-image-codex.git"
+  },
+  "homepage": "https://github.com/afu-it/create-image-codex",
+  "engines": {
+    "node": ">=14"
+  }
+}
