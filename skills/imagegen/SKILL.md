@@ -1,6 +1,6 @@
 ---
-name: "imagegen"
-description: "Use when the user asks to generate or edit images (e.g., generate image, edit/inpaint/mask, background removal, transparent background, product shots, concept art, covers, or batch variants). Runs built-in image_generation_call first, then falls back to custom endpoint via auth.json."
+name: "create image codex"
+description: "Create images on codex esp with 9router (e.g., generate image, edit/inpaint/mask, background removal, transparent background, product shots, concept art, covers, or batch variants). Runs built-in image_generation_call first, then falls back to custom endpoint via auth.json."
 ---
 
 # Image Generation Skill
